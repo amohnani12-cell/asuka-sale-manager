@@ -1,9 +1,8 @@
-import{useState,useEffect,useRef}from'react';
+import{useState,useEffect,useCallback}from'react';
 import Head from'next/head';
 const fmt=n=>'₹'+parseFloat(n).toLocaleString('en-IN',{maximumFractionDigits:0});
 export default function App(){
 const[products,setProducts]=useState([]);
-const[filtered,setFiltered]=useState([]);
 const[idx,setIdx]=useState(0);
 const[loading,setLoading]=useState(true);
 const[msg,setMsg]=useState('Loading...');
@@ -16,55 +15,73 @@ const[filter,setFilter]=useState('all');
 const[typeFilter,setTypeFilter]=useState('all');
 const[saving,setSaving]=useState(false);
 const[err,setErr]=useState('');
-const imgRef=useRef(null);
 
 useEffect(()=>{
 (async()=>{
-  // Fetch all pages in parallel for speed
   setMsg('Fetching products...');
-  const first = await fetch('/api/products?since_id=0');
-  const fd = await first.json();
-  if(!fd.products) return;
-  let all = fd.products;
-  // Get remaining pages in parallel
-  if(fd.products.length===250){
-    const pages = [];
-    let sid = fd.products[fd.products.length-1].id;
-    while(true){
-      const r = await fetch('/api/products?since_id='+sid);
-      const d = await r.json();
-      if(!d.products||d.products.length===0) break;
-      all = [...all, ...d.products];
-      sid = d.products[d.products.length-1].id;
-      setMsg('Loading... '+all.length+' products');
-      if(d.products.length<250) break;
-    }
+  let all=[],sid='0';
+  while(true){
+    const r=await fetch('/api/products?since_id='+sid);
+    const d=await r.json();
+    if(!d.products||!d.products.length)break;
+    all=[...all,...d.products.map(p=>({id:p.id,title:p.title,status:p.status,productType:p.product_type||'Uncategorized',price:parseFloat(p.variants[0]?.price||0),compareAt:p.variants[0]?.compare_at_price?parseFloat(p.variants[0].compare_at_price):null,variantId:p.variants[0]?.id,image:p.images[0]?.src||''}))];
+    sid=all[all.length-1].id;
+    setMsg('Loading... '+all.length);
+    if(d.products.length<250)break;
   }
-  const mapped = all.map(p=>({id:p.id,title:p.title,status:p.status,productType:p.product_type||'Uncategorized',price:parseFloat(p.variants[0]?.price||0),compareAt:p.variants[0]?.compare_at_price?parseFloat(p.variants[0].compare_at_price):null,variantId:p.variants[0]?.id,image:p.images[0]?.src||''}));
-  setProducts(mapped);setFiltered(mapped);setLoading(false);
-  setStatus('Loaded '+mapped.length+' products — Ready!');setStype('success');
+  setProducts(all);setLoading(false);
+  setStatus('Loaded '+all.length+' products — Ready!');setStype('success');
 })().catch(e=>setMsg('Error: '+e.message));
 },[]);
 
-const types = ['all',...[...new Set(products.map(p=>p.productType))].sort()];
+// Compute filtered WITHOUT resetting idx - idx is managed separately
+const filtered=products.filter(p=>{
+  if(filter!=='all'&&p.status!==filter)return false;
+  if(typeFilter!=='all'&&p.productType!==typeFilter)return false;
+  return true;
+});
 
-useEffect(()=>{
-  let f = filter==='all'?products:products.filter(p=>p.status===filter);
-  if(typeFilter!=='all') f=f.filter(p=>p.productType===typeFilter);
-  setFiltered(f);setIdx(0);
-},[filter,typeFilter,products]);
+// Only reset idx when filters change
+useEffect(()=>{setIdx(0);},[filter,typeFilter]);
 
+const types=['all',...[...new Set(products.map(p=>p.productType))].sort()];
 const cur=filtered[idx];
 const sp=()=>{if(!cur)return null;const p=parseFloat(pct),e=parseFloat(exact);if(p>0&&p<100)return Math.round(cur.price*(1-p/100));if(e>0&&e<cur.price)return Math.round(e);return null;};
 const sale=sp();
 
-const apply=async()=>{if(!sale){setErr('Enter % or price');return;}setSaving(true);setErr('');setStype('loading');
-try{const r=await fetch('/api/update-variant?variantId='+cur.variantId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({variant:{id:cur.variantId,price:sale.toString(),compare_at_price:cur.price.toString()}})});
-const d=await r.json();
-if(d.variant){const old=cur.price;setProducts(p=>p.map(x=>x.id===cur.id?{...x,compareAt:old,price:sale}:x));setUpdated(u=>[{title:cur.title,type:cur.productType,from:old,to:sale},...u]);setStatus('Updated: '+cur.title);setStype('success');setPct('');setExact('');setTimeout(()=>{if(idx<filtered.length-1)setIdx(i=>i+1);},400);}
-else{setErr('Failed');setStype('error');}}catch(e){setErr(e.message);setStype('error');}setSaving(false);};
+const clearInputs=()=>{setPct('');setExact('');setErr('');};
+const goNext=useCallback(()=>{setIdx(i=>Math.min(i+1,filtered.length-1));clearInputs();},[filtered.length]);
+const goPrev=useCallback(()=>{setIdx(i=>Math.max(i-1,0));clearInputs();},[]);
 
-const remove=async()=>{setSaving(true);try{const r=await fetch('/api/update-variant?variantId='+cur.variantId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({variant:{id:cur.variantId,price:cur.compareAt.toString(),compare_at_price:''}})});const d=await r.json();if(d.variant){setProducts(p=>p.map(x=>x.id===cur.id?{...x,price:cur.compareAt,compareAt:null}:x));setStatus('Sale removed');setStype('success');}}catch(e){setErr(e.message);}setSaving(false);};
+const apply=async()=>{
+  if(!sale){setErr('Enter % or price');return;}
+  setSaving(true);setErr('');setStype('loading');
+  try{
+    const r=await fetch('/api/update-variant?variantId='+cur.variantId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({variant:{id:cur.variantId,price:sale.toString(),compare_at_price:cur.price.toString()}})});
+    const d=await r.json();
+    if(d.variant){
+      const old=cur.price;
+      // Update product in place - no filter/idx reset
+      setProducts(p=>p.map(x=>x.id===cur.id?{...x,compareAt:old,price:sale}:x));
+      setUpdated(u=>[{title:cur.title,type:cur.productType,from:old,to:sale},...u]);
+      setStatus('Updated: '+cur.title);setStype('success');
+      // Move to next product
+      setIdx(i=>Math.min(i+1,filtered.length-1));
+      clearInputs();
+    }else{setErr('Failed: '+JSON.stringify(d.errors||d));setStype('error');}
+  }catch(e){setErr(e.message);setStype('error');}
+  setSaving(false);
+};
+
+const remove=async()=>{
+  setSaving(true);
+  try{
+    const r=await fetch('/api/update-variant?variantId='+cur.variantId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({variant:{id:cur.variantId,price:cur.compareAt.toString(),compare_at_price:''}})});
+    const d=await r.json();
+    if(d.variant){setProducts(p=>p.map(x=>x.id===cur.id?{...x,price:cur.compareAt,compareAt:null}:x));setStatus('Sale removed');setStype('success');}
+  }catch(e){setErr(e.message);}
+  setSaving(false);
+};
 
 const cnt={all:products.length,active:products.filter(p=>p.status==='active').length,draft:products.filter(p=>p.status==='draft').length};
 const G='#006B4F',GOLD='#C9A84C',R='#B91C1C',D='#111827',M='#4B5563',B='#E5E7EB';
@@ -75,59 +92,53 @@ return(<><Head><title>Asuka Couture — Sale Manager</title></Head>
 <div style={{display:'flex',flexDirection:'column',height:'100vh',background:'#F3F4F6',overflow:'hidden',fontFamily:'system-ui'}}>
 <header style={{background:D,color:'white',padding:'10px 24px',display:'flex',alignItems:'center',justifyContent:'space-between',flexShrink:0,borderBottom:'3px solid '+GOLD}}>
 <div><div style={{fontSize:17,fontWeight:800,letterSpacing:1}}>ASUKA <span style={{color:GOLD}}>COUTURE</span></div><div style={{fontSize:9,color:'#9CA3AF'}}>END OF SEASON SALE MANAGER</div></div>
-<div style={{background:'rgba(255,255,255,.1)',border:'1px solid rgba(255,255,255,.15)',padding:'4px 12px',borderRadius:20,fontSize:11,color:'#D1D5DB'}}><strong style={{color:GOLD}}>{updated.length}</strong> updated · {filtered.length}/{products.length} products</div>
+<div style={{background:'rgba(255,255,255,.1)',border:'1px solid rgba(255,255,255,.15)',padding:'4px 12px',borderRadius:20,fontSize:11,color:'#D1D5DB'}}><strong style={{color:GOLD}}>{updated.length}</strong> updated · {filtered.length}/{products.length}</div>
 </header>
 
 <div style={{flex:1,display:'grid',gridTemplateColumns:'1fr 320px',overflow:'hidden'}}>
 <div style={{display:'flex',flexDirection:'column',padding:'12px 16px',gap:10,overflowY:'auto'}}>
 
-  {/* Filters row */}
   <div style={{display:'flex',gap:6,flexWrap:'wrap',alignItems:'center'}}>
     <span style={{fontSize:11,color:M,fontWeight:600}}>Status:</span>
     {['all','active','draft'].map(f=><button key={f} onClick={()=>setFilter(f)} style={{padding:'3px 12px',borderRadius:20,fontSize:11,fontWeight:600,cursor:'pointer',border:'1px solid',borderColor:filter===f?D:B,background:filter===f?D:'white',color:filter===f?'white':M}}>{f[0].toUpperCase()+f.slice(1)} ({cnt[f]})</button>)}
     <span style={{fontSize:11,color:M,fontWeight:600,marginLeft:8}}>Type:</span>
-    <select value={typeFilter} onChange={e=>setTypeFilter(e.target.value)} style={{padding:'3px 8px',borderRadius:6,fontSize:11,border:'1px solid '+B,background:'white',color:M,cursor:'pointer',maxWidth:180}}>
-      {types.map(t=><option key={t} value={t}>{t==='all'?'All Types':t} {t==='all'?'('+products.length+')':''}</option>)}
+    <select value={typeFilter} onChange={e=>setTypeFilter(e.target.value)} style={{padding:'3px 8px',borderRadius:6,fontSize:11,border:'1px solid '+B,background:'white',color:M,cursor:'pointer',maxWidth:200}}>
+      {types.map(t=><option key={t} value={t}>{t==='all'?'All Types ('+products.length+')':t}</option>)}
     </select>
   </div>
 
-  {/* Product card - horizontal layout for speed */}
-  {cur?(<div style={{background:'white',borderRadius:14,boxShadow:'0 4px 20px rgba(0,0,0,.08)',overflow:'hidden',border:'1px solid '+B,display:'flex',gap:0}}>
+  {cur?(<div style={{background:'white',borderRadius:14,boxShadow:'0 4px 20px rgba(0,0,0,.08)',overflow:'hidden',border:'1px solid '+B,display:'flex'}}>
     <div style={{position:'relative',background:'#FAFAFA',width:220,flexShrink:0,display:'flex',alignItems:'center',justifyContent:'center',borderRight:'1px solid '+B,overflow:'hidden',minHeight:200}}>
       {cur.compareAt&&<div style={{position:'absolute',top:10,left:0,background:R,color:'white',fontSize:9,fontWeight:700,padding:'3px 10px 3px 6px',letterSpacing:1,clipPath:'polygon(0 0,calc(100% - 6px) 0,100% 50%,calc(100% - 6px) 100%,0 100%)'}}>ON SALE</div>}
-      {cur.image?<img ref={imgRef} src={cur.image} alt="" style={{maxHeight:200,maxWidth:'100%',objectFit:'contain'}}/>:<div style={{color:'#D1D5DB',fontSize:12}}>No Image</div>}
+      {cur.image?<img src={cur.image} alt="" style={{maxHeight:200,maxWidth:'100%',objectFit:'contain'}}/>:<div style={{color:'#D1D5DB',fontSize:12}}>No Image</div>}
     </div>
     <div style={{padding:'16px 20px',flex:1,display:'flex',flexDirection:'column',justifyContent:'center',gap:8}}>
-      <div style={{display:'flex',gap:6,alignItems:'center',flexWrap:'wrap'}}>
+      <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
         <span style={{fontSize:10,fontWeight:600,padding:'2px 7px',borderRadius:6,background:cur.status==='active'?'#D1FAE5':'#FEF3C7',color:cur.status==='active'?'#065F46':'#92400E'}}>{cur.status}</span>
         <span style={{fontSize:10,fontWeight:600,padding:'2px 7px',borderRadius:6,background:'#EEF2FF',color:'#4338CA'}}>{cur.productType}</span>
       </div>
       <div style={{fontSize:17,fontWeight:700,color:D,lineHeight:1.3}}>{cur.title}</div>
-      <div style={{display:'flex',alignItems:'baseline',gap:8}}>
+      <div style={{display:'flex',alignItems:'baseline',gap:8,flexWrap:'wrap'}}>
         <span style={{fontSize:24,fontWeight:800,color:G}}>{fmt(cur.price)}</span>
         {cur.compareAt&&<><span style={{fontSize:13,color:'#9CA3AF',textDecoration:'line-through'}}>{fmt(cur.compareAt)}</span><span style={{fontSize:10,fontWeight:700,background:'#FEF2F2',color:R,padding:'2px 7px',borderRadius:6}}>{Math.round((1-cur.price/cur.compareAt)*100)}% OFF</span></>}
       </div>
       <div style={{fontSize:11,color:'#9CA3AF'}}>{idx+1} of {filtered.length}</div>
     </div>
-  </div>):<div style={{color:'#9CA3AF',textAlign:'center',padding:40}}>No products match filters</div>}
+  </div>):<div style={{color:'#9CA3AF',textAlign:'center',padding:40,background:'white',borderRadius:14,border:'1px solid '+B}}>No products match current filters</div>}
 
-  {/* Nav */}
   <div style={{display:'flex',alignItems:'center',gap:10}}>
-    <button onClick={()=>{setIdx(i=>i-1);setPct('');setExact('');setErr('');}} disabled={idx===0} style={{background:'white',border:'1px solid '+B,padding:'8px 20px',borderRadius:8,cursor:'pointer',fontSize:13,fontWeight:600,color:M,boxShadow:'0 1px 4px rgba(0,0,0,.06)'}}>&#8592; Prev</button>
+    <button onClick={goPrev} disabled={idx===0} style={{background:'white',border:'1px solid '+B,padding:'8px 20px',borderRadius:8,cursor:'pointer',fontSize:13,fontWeight:600,color:M,boxShadow:'0 1px 4px rgba(0,0,0,.06)'}}>&#8592; Prev</button>
     <span style={{flex:1,textAlign:'center',fontSize:12,color:M}}>{filtered.length?idx+1+' / '+filtered.length:'0 / 0'}</span>
-    <button onClick={()=>{setIdx(i=>i+1);setPct('');setExact('');setErr('');}} disabled={idx>=filtered.length-1} style={{background:'white',border:'1px solid '+B,padding:'8px 20px',borderRadius:8,cursor:'pointer',fontSize:13,fontWeight:600,color:M,boxShadow:'0 1px 4px rgba(0,0,0,.06)'}}>Next &#8594;</button>
+    <button onClick={goNext} disabled={!cur||idx>=filtered.length-1} style={{background:'white',border:'1px solid '+B,padding:'8px 20px',borderRadius:8,cursor:'pointer',fontSize:13,fontWeight:600,color:M,boxShadow:'0 1px 4px rgba(0,0,0,.06)'}}>Next &#8594;</button>
   </div>
 
-  {/* Updated table */}
   {updated.length>0&&<div style={{background:'white',borderRadius:12,border:'1px solid '+B,overflow:'hidden'}}>
     <div style={{padding:'8px 14px',background:'#F9FAFB',borderBottom:'1px solid '+B,fontSize:10,fontWeight:700,letterSpacing:1,textTransform:'uppercase',color:'#9CA3AF'}}>Updated ({updated.length})</div>
     <table style={{width:'100%',borderCollapse:'collapse'}}>
-      <thead><tr style={{background:'#F9FAFB'}}>
-        {['Product','Collection','Was','Now','Saving'].map(h=><th key={h} style={{padding:'6px 12px',fontSize:10,fontWeight:700,color:M,textAlign:'left',borderBottom:'1px solid '+B}}>{h}</th>)}
-      </tr></thead>
+      <thead><tr>{['Product','Type','Was','Now','Saving'].map(h=><th key={h} style={{padding:'6px 12px',fontSize:10,fontWeight:700,color:M,textAlign:'left',borderBottom:'1px solid '+B}}>{h}</th>)}</tr></thead>
       <tbody>{updated.map((u,i)=><tr key={i} style={{borderBottom:'1px solid #F9FAFB'}}>
-        <td style={{padding:'7px 12px',fontSize:12,fontWeight:600,color:D,maxWidth:200,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{u.title}</td>
-        <td style={{padding:'7px 12px',fontSize:11,color:'#4338CA'}}><span style={{background:'#EEF2FF',padding:'2px 6px',borderRadius:4}}>{u.type}</span></td>
+        <td style={{padding:'7px 12px',fontSize:12,fontWeight:600,color:D,maxWidth:180,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>{u.title}</td>
+        <td style={{padding:'7px 12px'}}><span style={{fontSize:10,background:'#EEF2FF',color:'#4338CA',padding:'2px 6px',borderRadius:4,fontWeight:600}}>{u.type}</span></td>
         <td style={{padding:'7px 12px',fontSize:11,color:'#9CA3AF',textDecoration:'line-through'}}>{fmt(u.from)}</td>
         <td style={{padding:'7px 12px',fontSize:12,fontWeight:700,color:R}}>{fmt(u.to)}</td>
         <td style={{padding:'7px 12px',fontSize:11,color:G,fontWeight:600}}>{Math.round((1-u.to/u.from)*100)}% / {fmt(u.from-u.to)}</td>
@@ -136,7 +147,6 @@ return(<><Head><title>Asuka Couture — Sale Manager</title></Head>
   </div>}
 </div>
 
-{/* RIGHT panel */}
 <div style={{background:'white',borderLeft:'1px solid '+B,display:'flex',flexDirection:'column',overflowY:'auto'}}>
 <div style={{padding:'14px 16px',borderBottom:'1px solid #F3F4F6',flex:1}}>
   <div style={{fontSize:10,fontWeight:700,letterSpacing:1,textTransform:'uppercase',color:'#9CA3AF',marginBottom:10}}>Apply Discount</div>
@@ -164,7 +174,7 @@ return(<><Head><title>Asuka Couture — Sale Manager</title></Head>
 </div>
 <div style={{padding:'12px 16px',display:'flex',flexDirection:'column',gap:8}}>
   <button onClick={apply} disabled={saving||!cur} style={{background:G,color:'white',border:'none',padding:12,borderRadius:10,fontSize:13,fontWeight:700,cursor:'pointer',fontFamily:'inherit',width:'100%'}}>{saving?'Saving...':'✓ Apply & Next'}</button>
-  <button onClick={()=>{setIdx(i=>Math.min(i+1,filtered.length-1));setPct('');setExact('');setErr('');}} disabled={!cur} style={{background:'#F9FAFB',color:M,border:'1px solid '+B,padding:10,borderRadius:10,fontSize:12,cursor:'pointer',fontFamily:'inherit',width:'100%'}}>Skip</button>
+  <button onClick={goNext} disabled={!cur||idx>=filtered.length-1} style={{background:'#F9FAFB',color:M,border:'1px solid '+B,padding:10,borderRadius:10,fontSize:12,cursor:'pointer',fontFamily:'inherit',width:'100%'}}>Skip</button>
   {cur?.compareAt&&<button onClick={remove} disabled={saving} style={{background:'#FEF2F2',color:R,border:'1px solid #FECACA',padding:10,borderRadius:10,fontSize:12,cursor:'pointer',fontFamily:'inherit',width:'100%'}}>✕ Remove Sale</button>}
 </div>
 </div>
