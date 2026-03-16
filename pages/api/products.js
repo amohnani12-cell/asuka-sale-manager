@@ -1,1 +1,7 @@
-export default async function handler(req,res){const{since_id='0'}=req.query;const S=process.env.SHOPIFY_STORE,T=process.env.SHOPIFY_TOKEN;if(!S||!T)return res.status(500).json({error:'Missing SHOPIFY_STORE or SHOPIFY_TOKEN'});const r=await fetch('https://'+S+'/admin/api/2024-01/products.json?limit=250&fields=id,title,variants,images,status&since_id='+since_id,{headers:{'X-Shopify-Access-Token':T}});res.status(200).json(await r.json());}
+export default async function handler(req,res){
+const{since_id='0'}=req.query;
+const S=process.env.SHOPIFY_STORE,T=process.env.SHOPIFY_TOKEN;
+if(!S||!T)return res.status(500).json({error:'Missing env vars'});
+const r=await fetch('https://'+S+'/admin/api/2024-01/products.json?limit=250&fields=id,title,product_type,variants,images,status&since_id='+since_id,{headers:{'X-Shopify-Access-Token':T}});
+res.status(200).json(await r.json());
+}
