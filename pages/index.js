@@ -1,4 +1,4 @@
-import{useState,useEffect}from'react';
+import{useState,useEffect,useRef}from'react';
 import Head from'next/head';
 const fmt=n=>'₹'+parseFloat(n).toLocaleString('en-IN',{maximumFractionDigits:0});
 const PAGE_SIZE=10;
@@ -15,6 +15,12 @@ const[updated,setUpdated]=useState([]);
 const[inputs,setInputs]=useState({});
 const[selected,setSelected]=useState({});
 const[bulkExact,setBulkExact]=useState('');
+const[collections,setCollections]=useState([]);
+const[selCollection,setSelCollection]=useState('');
+const[collStatus,setCollStatus]=useState('');
+const[showCollPanel,setShowCollPanel]=useState(false);
+const[addingColl,setAddingColl]=useState(false);
+
 useEffect(()=>{
 (async()=>{
   let all=[],sid='0';
@@ -28,13 +34,12 @@ useEffect(()=>{
   }
   setProducts(all);setLoading(false);setStatus('Loaded '+all.length+' products');
 })().catch(e=>setMsg('Error: '+e.message));
+// Load collections
+fetch('/api/collections').then(r=>r.json()).then(d=>setCollections(d.collections||[])).catch(()=>{});
 },[]);
+
 useEffect(()=>{setPage(0);setSelected({});},[filter,typeFilter]);
-const filtered=products.filter(p=>{
-  if(filter!=='all'&&p.status!==filter)return false;
-  if(typeFilter!=='all'&&p.productType!==typeFilter)return false;
-  return true;
-});
+const filtered=products.filter(p=>{if(filter!=='all'&&p.status!==filter)return false;if(typeFilter!=='all'&&p.productType!==typeFilter)return false;return true;});
 const totalPages=Math.ceil(filtered.length/PAGE_SIZE);
 const pageProd=filtered.slice(page*PAGE_SIZE,(page+1)*PAGE_SIZE);
 const types=['all',...[...new Set(products.map(p=>p.productType))].sort()];
@@ -44,50 +49,52 @@ const allPageSelected=pageProd.length>0&&pageProd.every(p=>selected[p.id]);
 const someSelected=selectedIds.length>0;
 const targets=someSelected?pageProd.filter(p=>selected[p.id]):pageProd;
 const toggleSelect=(id)=>setSelected(prev=>({...prev,[id]:!prev[id]}));
-const toggleAll=()=>{
-  if(allPageSelected){const n={...selected};pageProd.forEach(p=>delete n[p.id]);setSelected(n);}
-  else{const n={...selected};pageProd.forEach(p=>{n[p.id]=true;});setSelected(n);}
-};
-const getSale=(p)=>{
-  const inp=inputs[p.id]||{};
-  const pct=parseFloat(inp.pct),ex=parseFloat(inp.exact);
-  if(pct>0&&pct<100)return Math.round(p.price*(1-pct/100));
-  if(ex>0&&ex<p.price)return Math.round(ex);
-  return null;
-};
+const toggleAll=()=>{if(allPageSelected){const n={...selected};pageProd.forEach(p=>delete n[p.id]);setSelected(n);}else{const n={...selected};pageProd.forEach(p=>{n[p.id]=true;});setSelected(n);}};
+const getSale=(p)=>{const inp=inputs[p.id]||{};const pct=parseFloat(inp.pct),ex=parseFloat(inp.exact);if(pct>0&&pct<100)return Math.round(p.price*(1-pct/100));if(ex>0&&ex<p.price)return Math.round(ex);return null;};
 const setInput=(id,field,val)=>setInputs(prev=>({...prev,[id]:{...(prev[id]||{}),[field]:val,...(field==='pct'?{exact:''}:{pct:''})}}));
 const applyBulkPct=(pct)=>{const n={...inputs};targets.forEach(p=>{n[p.id]={pct:String(pct),exact:''};});setInputs(n);};
 const applyBulkExact=(val)=>{const price=parseFloat(val);if(!price)return;const n={...inputs};targets.forEach(p=>{n[p.id]={exact:String(price),pct:''};});setInputs(n);setBulkExact('');};
 const clearPage=()=>{const n={...inputs};pageProd.forEach(p=>delete n[p.id]);setInputs(n);};
-const removeSaleProduct=async(p)=>{
-  try{const r=await fetch('/api/update-variant?variantId='+p.variantId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({variant:{id:p.variantId,price:p.compareAt.toString(),compare_at_price:''}})});const d=await r.json();if(d.variant){setProducts(prev=>prev.map(x=>x.id===p.id?{...x,price:p.compareAt,compareAt:null}:x));setStatus('Removed: '+p.title);}}catch(e){}
-};
-const bulkRemove=async()=>{
-  const t=targets.filter(p=>p.compareAt);if(!t.length){setStatus('No sale products in selection');return;}
-  setSaving(true);let done=0;
-  for(const p of t){await removeSaleProduct(p);done++;}
-  setStatus('✓ Removed sale from '+done);setSaving(false);
-};
+const removeSaleProduct=async(p)=>{try{const r=await fetch('/api/update-variant?variantId='+p.variantId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({variant:{id:p.variantId,price:p.compareAt.toString(),compare_at_price:''}})});const d=await r.json();if(d.variant){setProducts(prev=>prev.map(x=>x.id===p.id?{...x,price:p.compareAt,compareAt:null}:x));setStatus('Removed: '+p.title);}}catch(e){}};
+const bulkRemove=async()=>{const t=targets.filter(p=>p.compareAt);if(!t.length){setStatus('No sale products in selection');return;}setSaving(true);for(const p of t)await removeSaleProduct(p);setStatus('✓ Removed sale from '+t.length);setSaving(false);};
 const saveAll=async()=>{
   const t=targets.filter(p=>getSale(p)!==null);
-  if(!t.length){setStatus('No discounts set — enter % or price first');return;}
+  if(!t.length){setStatus('No discounts set');return;}
   setSaving(true);setStatus('Saving '+t.length+'...');let done=0;
-  for(const p of t){
-    const sale=getSale(p);
-    try{const r=await fetch('/api/update-variant?variantId='+p.variantId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({variant:{id:p.variantId,price:sale.toString(),compare_at_price:p.price.toString()}})});const d=await r.json();if(d.variant){const old=p.price;setProducts(prev=>prev.map(x=>x.id===p.id?{...x,compareAt:old,price:sale}:x));setUpdated(u=>[{title:p.title,type:p.productType,from:old,to:sale},...u]);done++;}}catch(e){}
-  }
+  for(const p of t){const sale=getSale(p);try{const r=await fetch('/api/update-variant?variantId='+p.variantId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({variant:{id:p.variantId,price:sale.toString(),compare_at_price:p.price.toString()}})});const d=await r.json();if(d.variant){const old=p.price;setProducts(prev=>prev.map(x=>x.id===p.id?{...x,compareAt:old,price:sale}:x));setUpdated(u=>[{title:p.title,type:p.productType,from:old,to:sale},...u]);done++;}}catch(e){}}
   const n={...inputs};t.forEach(p=>delete n[p.id]);setInputs(n);
   setStatus('✓ Saved '+done+'!');setSaving(false);
   if(!someSelected)setTimeout(()=>{if(page<totalPages-1){setPage(p=>p+1);setSelected({});}},600);
 };
+
+const addToCollection=async()=>{
+  if(!selCollection){setCollStatus('Please select a collection');return;}
+  const ids=someSelected?selectedIds:pageProd.map(p=>String(p.id));
+  if(!ids.length){setCollStatus('No products to add');return;}
+  setAddingColl(true);setCollStatus('Adding '+ids.length+' products...');
+  try{
+    const r=await fetch('/api/add-to-collection',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({collectionId:parseInt(selCollection),productIds:ids.map(id=>parseInt(id))})});
+    const d=await r.json();
+    const cname=collections.find(c=>String(c.id)===selCollection)?.title||'collection';
+    setCollStatus('✓ Added '+d.done+' products to '+cname+'!');
+  }catch(e){setCollStatus('Error: '+e.message);}
+  setAddingColl(false);
+};
+
 const G='#006B4F',GOLD='#C9A84C',R='#B91C1C',D='#111827',M='#4B5563',B='#E5E7EB';
 if(loading)return(<div style={{height:'100vh',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:20,background:D,color:'white',fontFamily:'system-ui'}}><div style={{fontSize:32,fontWeight:800,letterSpacing:2}}>ASUKA <span style={{color:GOLD}}>COUTURE</span></div><div style={{width:32,height:32,border:'2px solid #374151',borderTopColor:GOLD,borderRadius:'50%',animation:'spin .8s linear infinite'}}/><div style={{fontSize:13,color:'#6B7280'}}>{msg}</div><style>{'@keyframes spin{to{transform:rotate(360deg)}}'}</style></div>);
+
 return(<><Head><title>Asuka Couture — Sale Manager</title></Head>
 <div style={{display:'flex',flexDirection:'column',height:'100vh',background:'#F3F4F6',overflow:'hidden',fontFamily:'system-ui'}}>
+
 <header style={{background:D,color:'white',padding:'10px 24px',display:'flex',alignItems:'center',justifyContent:'space-between',flexShrink:0,borderBottom:'3px solid '+GOLD}}>
 <div><div style={{fontSize:17,fontWeight:800,letterSpacing:1}}>ASUKA <span style={{color:GOLD}}>COUTURE</span></div><div style={{fontSize:9,color:'#9CA3AF'}}>END OF SEASON SALE MANAGER</div></div>
-<div style={{background:'rgba(255,255,255,.1)',border:'1px solid rgba(255,255,255,.15)',padding:'4px 12px',borderRadius:20,fontSize:11,color:'#D1D5DB'}}><strong style={{color:GOLD}}>{updated.length}</strong> updated · pg {page+1}/{totalPages}</div>
+<div style={{display:'flex',alignItems:'center',gap:10}}>
+  <div style={{background:'rgba(255,255,255,.1)',border:'1px solid rgba(255,255,255,.15)',padding:'4px 12px',borderRadius:20,fontSize:11,color:'#D1D5DB'}}><strong style={{color:GOLD}}>{updated.length}</strong> updated · pg {page+1}/{totalPages}</div>
+</div>
 </header>
+
+{/* FILTER BAR */}
 <div style={{background:'white',borderBottom:'1px solid '+B,padding:'8px 20px',display:'flex',gap:8,alignItems:'center',flexWrap:'wrap',flexShrink:0}}>
   <span style={{fontSize:11,color:M,fontWeight:600}}>Status:</span>
   {['all','active','draft'].map(f=><button key={f} onClick={()=>setFilter(f)} style={{padding:'3px 12px',borderRadius:20,fontSize:11,fontWeight:600,cursor:'pointer',border:'1px solid',borderColor:filter===f?D:B,background:filter===f?D:'white',color:filter===f?'white':M}}>{f[0].toUpperCase()+f.slice(1)} ({cnt[f]})</button>)}
@@ -96,6 +103,8 @@ return(<><Head><title>Asuka Couture — Sale Manager</title></Head>
     {types.map(t=><option key={t} value={t}>{t==='all'?'All Types ('+products.length+')':t}</option>)}
   </select>
 </div>
+
+{/* BULK ACTION BAR */}
 <div style={{background:'#F9FAFB',borderBottom:'1px solid '+B,padding:'7px 20px',display:'flex',gap:8,alignItems:'center',flexWrap:'wrap',flexShrink:0}}>
   <div onClick={toggleAll} style={{display:'flex',alignItems:'center',gap:6,cursor:'pointer',userSelect:'none'}}>
     <div style={{width:16,height:16,borderRadius:4,border:'2px solid '+(allPageSelected?D:'#9CA3AF'),background:allPageSelected?D:'white',display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
@@ -105,16 +114,34 @@ return(<><Head><title>Asuka Couture — Sale Manager</title></Head>
     <span style={{fontSize:11,color:M,fontWeight:600}}>{someSelected?selectedIds.length+' selected':'Select all'}</span>
   </div>
   <span style={{color:'#D1D5DB',fontSize:13}}>|</span>
-  <span style={{fontSize:11,color:M,fontWeight:600}}>Apply to {someSelected?'selected ('+selectedIds.length+')':'all on page'}:</span>
+  <span style={{fontSize:11,color:M,fontWeight:600}}>Apply to {someSelected?'selected':'all'}:</span>
   {[10,15,20,25,30,40,50].map(v=><button key={v} onClick={()=>applyBulkPct(v)} style={{padding:'3px 9px',background:'white',border:'1px solid '+B,borderRadius:20,fontSize:11,fontWeight:600,cursor:'pointer',color:M}}>{v}%</button>)}
   <div style={{display:'flex',alignItems:'center',gap:4}}>
     <input type="number" value={bulkExact} placeholder="₹ exact" onChange={e=>setBulkExact(e.target.value)} onKeyDown={e=>e.key==='Enter'&&applyBulkExact(bulkExact)} style={{padding:'3px 8px',border:'1px solid '+B,borderRadius:6,fontSize:11,width:85,outline:'none',fontFamily:'inherit'}}/>
     <button onClick={()=>applyBulkExact(bulkExact)} disabled={!bulkExact} style={{padding:'3px 8px',background:G,color:'white',border:'none',borderRadius:6,fontSize:11,fontWeight:600,cursor:'pointer'}}>Set</button>
   </div>
   <span style={{color:'#D1D5DB',fontSize:13}}>|</span>
-  <button onClick={bulkRemove} disabled={saving} style={{padding:'3px 10px',background:'#FEF2F2',border:'1px solid #FECACA',borderRadius:6,fontSize:11,fontWeight:600,cursor:'pointer',color:R}}>✕ Remove Sale {someSelected?'('+selectedIds.filter(id=>{const p=products.find(x=>x.id==id);return p&&p.compareAt;}).length+')':'(all on page)'}</button>
+  <button onClick={bulkRemove} disabled={saving} style={{padding:'3px 10px',background:'#FEF2F2',border:'1px solid #FECACA',borderRadius:6,fontSize:11,fontWeight:600,cursor:'pointer',color:R}}>✕ Remove Sale</button>
+  <span style={{color:'#D1D5DB',fontSize:13}}>|</span>
+  <button onClick={()=>setShowCollPanel(p=>!p)} style={{padding:'3px 12px',background:showCollPanel?'#4338CA':'#EEF2FF',color:showCollPanel?'white':'#4338CA',border:'1px solid #C7D2FE',borderRadius:6,fontSize:11,fontWeight:700,cursor:'pointer'}}>&#43; Add to Collection {someSelected?'('+selectedIds.length+')':''}</button>
   <button onClick={clearPage} style={{padding:'3px 10px',background:'white',border:'1px solid '+B,borderRadius:6,fontSize:11,cursor:'pointer',color:M,marginLeft:'auto'}}>Clear inputs</button>
 </div>
+
+{/* COLLECTION PANEL */}
+{showCollPanel&&<div style={{background:'#EEF2FF',borderBottom:'2px solid #C7D2FE',padding:'10px 20px',display:'flex',gap:10,alignItems:'center',flexShrink:0}}>
+  <span style={{fontSize:12,fontWeight:700,color:'#4338CA'}}>&#128218; Add {someSelected?selectedIds.length+' selected':pageProd.length+' on page'} products to:</span>
+  <select value={selCollection} onChange={e=>setSelCollection(e.target.value)} style={{flex:1,maxWidth:320,padding:'6px 10px',borderRadius:8,fontSize:12,border:'1px solid #C7D2FE',background:'white',color:D,cursor:'pointer',outline:'none'}}>
+    <option value="">-- Select a collection --</option>
+    {collections.map(c=><option key={c.id} value={c.id}>{c.title}</option>)}
+  </select>
+  <button onClick={addToCollection} disabled={addingColl||!selCollection} style={{padding:'6px 18px',background:'#4338CA',color:'white',border:'none',borderRadius:8,fontSize:12,fontWeight:700,cursor:'pointer',fontFamily:'inherit',opacity:addingColl?.6:1}}>
+    {addingColl?'Adding...':'Add to Collection'}
+  </button>
+  {collStatus&&<span style={{fontSize:11,color:collStatus.includes('✓')?G:R,fontWeight:600}}>{collStatus}</span>}
+  <button onClick={()=>{setShowCollPanel(false);setCollStatus('');}} style={{padding:'4px 8px',background:'white',border:'1px solid #C7D2FE',borderRadius:6,fontSize:11,cursor:'pointer',color:M,marginLeft:'auto'}}>Close</button>
+</div>}
+
+{/* GRID */}
 <div style={{flex:1,overflowY:'auto',padding:'12px 20px'}}>
   <div style={{display:'grid',gridTemplateColumns:'repeat(5,1fr)',gap:10}}>
     {pageProd.map(p=>{
@@ -154,6 +181,8 @@ return(<><Head><title>Asuka Couture — Sale Manager</title></Head>
     })}
   </div>
 </div>
+
+{/* BOTTOM BAR */}
 <div style={{background:'white',borderTop:'1px solid '+B,padding:'10px 20px',display:'flex',alignItems:'center',gap:12,flexShrink:0}}>
   <button onClick={()=>{setPage(p=>Math.max(p-1,0));setSelected({});}} disabled={page===0} style={{background:'white',border:'1px solid '+B,padding:'8px 18px',borderRadius:8,cursor:'pointer',fontSize:13,fontWeight:600,color:M}}>&#8592; Prev</button>
   <span style={{fontSize:12,color:M}}>{page*PAGE_SIZE+1}–{Math.min((page+1)*PAGE_SIZE,filtered.length)} of {filtered.length}</span>
@@ -164,6 +193,7 @@ return(<><Head><title>Asuka Couture — Sale Manager</title></Head>
     {saving?'Saving...':someSelected?'✓ Save Selected ('+selectedIds.length+')':'✓ Save All & Next'}
   </button>
 </div>
+
 {updated.length>0&&<div style={{background:D,color:'#9CA3AF',padding:'5px 20px',fontSize:10,borderTop:'1px solid #374151',flexShrink:0}}>
   <strong style={{color:GOLD}}>{updated.length}</strong> updated · latest: {updated[0]?.title} ({fmt(updated[0]?.from)} → {fmt(updated[0]?.to)})
 </div>}
