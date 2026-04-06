@@ -1,6 +1,6 @@
 import{useState,useEffect}from'react';
 import Head from'next/head';
-const fmt=n=>'₹'+parseFloat(n).toLocaleString('en-IN',{maximumFractionDigits:0});
+const fmt=n=>'â¹'+parseFloat(n).toLocaleString('en-IN',{maximumFractionDigits:0});
 const PAGE_SIZE=10;
 export default function App(){
 const[products,setProducts]=useState([]);
@@ -72,13 +72,13 @@ const applyBulkExact=(val)=>{const price=parseFloat(val);if(!price)return;const 
 const clearPage=()=>{const n={...inputs};pageProd.forEach(p=>delete n[p.id]);setInputs(n);};
 
 const removeSaleProduct=async(p)=>{
-  try{const r=await fetch('/api/update-variant?variantId='+p.variantId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({variant:{id:p.variantId,price:p.compareAt.toString(),compare_at_price:''}})});const d=await r.json();if(d.variant){setProducts(prev=>prev.map(x=>x.id===p.id?{...x,price:p.compareAt,compareAt:null}:x));setStatus('Removed: '+p.title);}}catch(e){}
+  try{const r=await fetch('/api/remove-sale?productId='+p.id,{method:'PUT',headers:{'Content-Type':'application/json'}});const d=await r.json();if(d.done>0){setProducts(prev=>prev.map(x=>x.id===p.id?{...x,price:p.compareAt,compareAt:null}:x));setStatus('Removed: '+p.title+' ('+d.done+' variants)');}}catch(e){}
 };
 
 const bulkRemove=async()=>{
   const t=targets.filter(p=>p.compareAt);if(!t.length){setStatus('No sale products in selection');return;}
   setSaving(true);let done=0;for(const p of t){await removeSaleProduct(p);done++;}
-  setStatus('✓ Removed sale from '+done);setSaving(false);
+  setStatus('â Removed sale from '+done);setSaving(false);
 };
 
 const saveAll=async()=>{
@@ -87,10 +87,10 @@ const saveAll=async()=>{
   setSaving(true);setStatus('Saving '+t.length+'...');let done=0;
   for(const p of t){
     const sale=getSale(p);
-    try{const r=await fetch('/api/update-variant?variantId='+p.variantId,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({variant:{id:p.variantId,price:sale.toString(),compare_at_price:p.price.toString()}})});const d=await r.json();if(d.variant){const old=p.price;setProducts(prev=>prev.map(x=>x.id===p.id?{...x,compareAt:old,price:sale}:x));setUpdated(u=>[{title:p.title,type:p.productType,from:old,to:sale},...u]);done++;}}catch(e){}
+    try{const r=await fetch('/api/update-all-variants?productId='+p.id,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({salePrice:sale,originalPrice:p.price})});const d=await r.json();if(d.done>0){const old=p.price;setProducts(prev=>prev.map(x=>x.id===p.id?{...x,compareAt:old,price:sale}:x));setUpdated(u=>[{title:p.title,type:p.productType,from:old,to:sale},...u]);done++;}}catch(e){}
   }
   const n={...inputs};t.forEach(p=>delete n[p.id]);setInputs(n);
-  setStatus('✓ Saved '+done+'!');setSaving(false);
+  setStatus('â Saved '+done+'!');setSaving(false);
   if(!someSelected)setTimeout(()=>{if(page<totalPages-1){setPage(p=>p+1);setSelected({});}},600);
 };
 
@@ -101,7 +101,7 @@ const addToCollection=async(collId,collTitle)=>{
   try{
     const r=await fetch('/api/collections',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({collectionId:collId,productIds:pids})});
     const d=await r.json();
-    setCollStatus('✓ Added '+d.done+' of '+d.total+' products to '+collTitle);
+    setCollStatus('â Added '+d.done+' of '+d.total+' products to '+collTitle);
   }catch(e){setCollStatus('Error: '+e.message);}
   setAddingColl(false);
   setTimeout(()=>setShowCollModal(false),2000);
@@ -112,7 +112,7 @@ const G='#006B4F',GOLD='#C9A84C',R='#B91C1C',D='#111827',M='#4B5563',B='#E5E7EB'
 
 if(loading)return(<div style={{height:'100vh',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:20,background:D,color:'white',fontFamily:'system-ui'}}><div style={{fontSize:32,fontWeight:800,letterSpacing:2}}>ASUKA <span style={{color:GOLD}}>COUTURE</span></div><div style={{width:32,height:32,border:'2px solid #374151',borderTopColor:GOLD,borderRadius:'50%',animation:'spin .8s linear infinite'}}/><div style={{fontSize:13,color:'#6B7280'}}>{msg}</div><style>{'@keyframes spin{to{transform:rotate(360deg)}}'}</style></div>);
 
-return(<><Head><title>Asuka Couture — Sale Manager</title></Head>
+return(<><Head><title>Asuka Couture â Sale Manager</title></Head>
 <div style={{display:'flex',flexDirection:'column',height:'100vh',background:'#F3F4F6',overflow:'hidden',fontFamily:'system-ui'}}>
 
 {/* COLLECTION MODAL */}
@@ -123,7 +123,7 @@ return(<><Head><title>Asuka Couture — Sale Manager</title></Head>
         <div style={{fontSize:16,fontWeight:700,color:D}}>Add to Collection</div>
         <div style={{fontSize:12,color:M,marginTop:2}}>Adding {someSelected?selectedIds.length+' selected':pageProd.length+' on page'} products</div>
       </div>
-      <button onClick={()=>setShowCollModal(false)} style={{background:'#F3F4F6',border:'none',borderRadius:8,padding:'6px 10px',cursor:'pointer',fontSize:16,color:M}}>×</button>
+      <button onClick={()=>setShowCollModal(false)} style={{background:'#F3F4F6',border:'none',borderRadius:8,padding:'6px 10px',cursor:'pointer',fontSize:16,color:M}}>Ã</button>
     </div>
     <input type="text" value={collSearch} onChange={e=>setCollSearch(e.target.value)} placeholder="Search collections..." autoFocus style={{padding:'10px 14px',border:'1.5px solid '+B,borderRadius:10,fontSize:14,outline:'none',fontFamily:'inherit'}}/>
     <div style={{overflowY:'auto',flex:1,display:'flex',flexDirection:'column',gap:6}}>
@@ -133,16 +133,16 @@ return(<><Head><title>Asuka Couture — Sale Manager</title></Head>
           <div style={{fontSize:13,fontWeight:600,color:D}}>{c.title}</div>
           <div style={{fontSize:10,color:'#9CA3AF',marginTop:2,textTransform:'capitalize'}}>{c.type} collection</div>
         </div>
-        <span style={{fontSize:11,color:'#4338CA',fontWeight:600}}>Add →</span>
+        <span style={{fontSize:11,color:'#4338CA',fontWeight:600}}>Add â</span>
       </button>)}
     </div>
-    {collStatus&&<div style={{padding:'10px 14px',background:collStatus.includes('✓')?'#E8F5F0':'#FEF3C7',borderRadius:8,fontSize:12,color:collStatus.includes('✓')?G:'#92400E',fontWeight:500}}>{collStatus}</div>}
+    {collStatus&&<div style={{padding:'10px 14px',background:collStatus.includes('â')?'#E8F5F0':'#FEF3C7',borderRadius:8,fontSize:12,color:collStatus.includes('â')?G:'#92400E',fontWeight:500}}>{collStatus}</div>}
   </div>
 </div>}
 
 <header style={{background:D,color:'white',padding:'10px 24px',display:'flex',alignItems:'center',justifyContent:'space-between',flexShrink:0,borderBottom:'3px solid '+GOLD}}>
 <div><div style={{fontSize:17,fontWeight:800,letterSpacing:1}}>ASUKA <span style={{color:GOLD}}>COUTURE</span></div><div style={{fontSize:9,color:'#9CA3AF'}}>END OF SEASON SALE MANAGER</div></div>
-<div style={{background:'rgba(255,255,255,.1)',border:'1px solid rgba(255,255,255,.15)',padding:'4px 12px',borderRadius:20,fontSize:11,color:'#D1D5DB'}}><strong style={{color:GOLD}}>{updated.length}</strong> updated · pg {page+1}/{totalPages}</div>
+<div style={{background:'rgba(255,255,255,.1)',border:'1px solid rgba(255,255,255,.15)',padding:'4px 12px',borderRadius:20,fontSize:11,color:'#D1D5DB'}}><strong style={{color:GOLD}}>{updated.length}</strong> updated Â· pg {page+1}/{totalPages}</div>
 </header>
 
 <div style={{background:'white',borderBottom:'1px solid '+B,padding:'8px 20px',display:'flex',gap:8,alignItems:'center',flexWrap:'wrap',flexShrink:0}}>
@@ -166,11 +166,11 @@ return(<><Head><title>Asuka Couture — Sale Manager</title></Head>
   <span style={{fontSize:11,color:M,fontWeight:600}}>Apply to {someSelected?'selected':'all on page'}:</span>
   {[10,15,20,25,30,40,50].map(v=><button key={v} onClick={()=>applyBulkPct(v)} style={{padding:'3px 9px',background:'white',border:'1px solid '+B,borderRadius:20,fontSize:11,fontWeight:600,cursor:'pointer',color:M}}>{v}%</button>)}
   <div style={{display:'flex',alignItems:'center',gap:4}}>
-    <input type="number" value={bulkExact} placeholder="₹ exact" onChange={e=>setBulkExact(e.target.value)} onKeyDown={e=>e.key==='Enter'&&applyBulkExact(bulkExact)} style={{padding:'3px 8px',border:'1px solid '+B,borderRadius:6,fontSize:11,width:85,outline:'none',fontFamily:'inherit'}}/>
+    <input type="number" value={bulkExact} placeholder="â¹ exact" onChange={e=>setBulkExact(e.target.value)} onKeyDown={e=>e.key==='Enter'&&applyBulkExact(bulkExact)} style={{padding:'3px 8px',border:'1px solid '+B,borderRadius:6,fontSize:11,width:85,outline:'none',fontFamily:'inherit'}}/>
     <button onClick={()=>applyBulkExact(bulkExact)} disabled={!bulkExact} style={{padding:'3px 8px',background:G,color:'white',border:'none',borderRadius:6,fontSize:11,fontWeight:600,cursor:'pointer'}}>Set</button>
   </div>
   <span style={{color:'#D1D5DB',fontSize:13}}>|</span>
-  <button onClick={bulkRemove} disabled={saving} style={{padding:'3px 10px',background:'#FEF2F2',border:'1px solid #FECACA',borderRadius:6,fontSize:11,fontWeight:600,cursor:'pointer',color:R}}>✕ Remove Sale</button>
+  <button onClick={bulkRemove} disabled={saving} style={{padding:'3px 10px',background:'#FEF2F2',border:'1px solid #FECACA',borderRadius:6,fontSize:11,fontWeight:600,cursor:'pointer',color:R}}>â Remove Sale</button>
   <button onClick={()=>{setCollStatus('');setCollSearch('');setShowCollModal(true);}} style={{padding:'3px 10px',background:'#EEF2FF',border:'1px solid #C7D2FE',borderRadius:6,fontSize:11,fontWeight:600,cursor:'pointer',color:'#4338CA'}}>&#128197; Add to Collection {someSelected?'('+selectedIds.length+')':'(page)'}</button>
   <button onClick={clearPage} style={{padding:'3px 10px',background:'white',border:'1px solid '+B,borderRadius:6,fontSize:11,cursor:'pointer',color:M,marginLeft:'auto'}}>Clear inputs</button>
 </div>
@@ -205,10 +205,10 @@ return(<><Head><title>Asuka Couture — Sale Manager</title></Head>
               <span style={{position:'absolute',right:4,top:'50%',transform:'translateY(-50%)',fontSize:9,color:M,pointerEvents:'none'}}>%</span>
             </div>
             <div style={{flex:1}}>
-              <input type="number" value={inp.exact||''} min="1" placeholder="₹" onChange={e=>setInput(p.id,'exact',e.target.value)} style={{width:'100%',padding:'5px 7px',border:'1.5px solid '+(inp.exact?G:B),borderRadius:6,fontSize:12,color:D,outline:'none',fontFamily:'inherit',boxSizing:'border-box'}}/>
+              <input type="number" value={inp.exact||''} min="1" placeholder="â¹" onChange={e=>setInput(p.id,'exact',e.target.value)} style={{width:'100%',padding:'5px 7px',border:'1.5px solid '+(inp.exact?G:B),borderRadius:6,fontSize:12,color:D,outline:'none',fontFamily:'inherit',boxSizing:'border-box'}}/>
             </div>
           </div>
-          {p.compareAt&&<button onClick={()=>removeSaleProduct(p)} style={{width:'100%',padding:'4px',background:'#FEF2F2',border:'1px solid #FECACA',borderRadius:6,fontSize:10,fontWeight:600,cursor:'pointer',color:R,fontFamily:'inherit'}}>✕ Remove Sale</button>}
+          {p.compareAt&&<button onClick={()=>removeSaleProduct(p)} style={{width:'100%',padding:'4px',background:'#FEF2F2',border:'1px solid #FECACA',borderRadius:6,fontSize:10,fontWeight:600,cursor:'pointer',color:R,fontFamily:'inherit'}}>â Remove Sale</button>}
         </div>
       </div>);
     })}
@@ -217,17 +217,17 @@ return(<><Head><title>Asuka Couture — Sale Manager</title></Head>
 
 <div style={{background:'white',borderTop:'1px solid '+B,padding:'10px 20px',display:'flex',alignItems:'center',gap:12,flexShrink:0}}>
   <button onClick={()=>{setPage(p=>Math.max(p-1,0));setSelected({});}} disabled={page===0} style={{background:'white',border:'1px solid '+B,padding:'8px 18px',borderRadius:8,cursor:'pointer',fontSize:13,fontWeight:600,color:M}}>&#8592; Prev</button>
-  <span style={{fontSize:12,color:M}}>{page*PAGE_SIZE+1}–{Math.min((page+1)*PAGE_SIZE,filtered.length)} of {filtered.length}</span>
+  <span style={{fontSize:12,color:M}}>{page*PAGE_SIZE+1}â{Math.min((page+1)*PAGE_SIZE,filtered.length)} of {filtered.length}</span>
   <button onClick={()=>{setPage(p=>Math.min(p+1,totalPages-1));setSelected({});}} disabled={page>=totalPages-1} style={{background:'white',border:'1px solid '+B,padding:'8px 18px',borderRadius:8,cursor:'pointer',fontSize:13,fontWeight:600,color:M}}>Next &#8594;</button>
   <div style={{flex:1}}/>
   {status&&<span style={{fontSize:11,color:M}}>{status}</span>}
   <button onClick={saveAll} disabled={saving} style={{background:G,color:'white',border:'none',padding:'10px 28px',borderRadius:10,fontSize:14,fontWeight:700,cursor:'pointer',fontFamily:'inherit',opacity:saving?.6:1}}>
-    {saving?'Saving...':someSelected?'✓ Save Selected ('+selectedIds.length+')':'✓ Save All & Next'}
+    {saving?'Saving...':someSelected?'â Save Selected ('+selectedIds.length+')':'â Save All & Next'}
   </button>
 </div>
 
 {updated.length>0&&<div style={{background:D,color:'#9CA3AF',padding:'5px 20px',fontSize:10,borderTop:'1px solid #374151',flexShrink:0}}>
-  <strong style={{color:GOLD}}>{updated.length}</strong> updated · latest: {updated[0]?.title} ({fmt(updated[0]?.from)} → {fmt(updated[0]?.to)})
+  <strong style={{color:GOLD}}>{updated.length}</strong> updated Â· latest: {updated[0]?.title} ({fmt(updated[0]?.from)} â {fmt(updated[0]?.to)})
 </div>}
 
 </div>
