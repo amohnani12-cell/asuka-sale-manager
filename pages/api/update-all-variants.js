@@ -1,0 +1,19 @@
+export default async function handler(req,res){
+if(req.method!=='PUT')return res.status(405).end();
+const{productId}=req.query;const{salePrice,originalPrice}=req.body;
+const S=process.env.SHOPIFY_STORE,T=process.env.SHOPIFY_TOKEN;
+try{
+const pr=await fetch('https://'+S+'/admin/api/2024-01/products/'+productId+'/variants.json',{headers:{'X-Shopify-Access-Token':T}});
+const variants=(await pr.json()).variants||[];
+const results=[];
+for(const v of variants){
+const vOrig=parseFloat(v.price);
+const ratio=originalPrice>0?vOrig/originalPrice:1;
+const vSale=Math.round(salePrice*ratio);
+const r=await fetch('https://'+S+'/admin/api/2024-01/variants/'+v.id+'.json',{method:'PUT',headers:{'X-Shopify-Access-Token':T,'Content-Type':'application/json'},body:JSON.stringify({variant:{id:v.id,price:vSale.toString(),compare_at_price:vOrig.toString()}})});
+const d=await r.json();
+results.push({id:v.id,success:!!d.variant,newPrice:vSale,origPrice:vOrig});
+}
+return res.json({results,done:results.filter(r=>r.success).length,total:variants.length});
+}catch(e){return res.status(500).json({error:e.message});}
+}
